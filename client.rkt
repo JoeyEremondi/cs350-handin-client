@@ -28,9 +28,7 @@
   (make-input-port 'ws-input
                   (lambda (mut-bytes)
                     (define in-port (ws-recv-stream conn))
-                    (define ret (read-bytes! mut-bytes in-port))
-                    (displayln (format "got input ~s" mut-bytes))
-                    ret
+                    (read-bytes! mut-bytes in-port)
                     )
                   #f
                   (lambda () (unless (ws-conn-closed? conn)
@@ -40,22 +38,16 @@
 (define (ws-output-port conn)
   (define current-bytes (open-output-bytes 'ws-output-buffer))
   ;; Start a send with the input port, waiting input to be provided to the output port
-  (displayln "connecting pipe")
-  (displayln "made pipe connection")
   (make-output-port 'ws-output
   always-evt
   (lambda (bytes start end flush block)
-    (displayln (format "Buffering bytes ~s, start ~s   end ~s, flush ~s, block ~s" bytes start end flush block))
     (define ret (write-bytes bytes current-bytes start end))
     ;; Start a new ws message if we're flushing
     (when (> end start) ;;flush
       (define buffered-bytes (get-output-bytes current-bytes))
-      (displayln (format "Writing bytes ~s" buffered-bytes))
       (ws-send! conn buffered-bytes)
-      (displayln "Done send, updating to new buffer")
       (set! current-bytes (open-output-bytes 'ws-output-buffer))
       )
-    (displayln (format "write returning ~s" ret))
     ret)
   ;; Close if we haven't already
   (lambda () (unless (ws-conn-closed? conn)
@@ -64,7 +56,6 @@
 
 (define (write+flush port . xs)
   (for ([x (in-list xs)]) (write x port) (newline port))
-  (displayln "Flushing output")
   (flush-output port))
 
 ;; (define (write+flush conn . xs)
@@ -113,15 +104,12 @@
     (write+flush w 'handin)
     ;; Sanity check: server sends "handin", first:
     (let ([s (read-bytes 6 r)])
-      (displayln (format "Read handin response ~s" s))
       (unless (equal? #"handin" s)
         (error 'handin-connect "bad handshake from server: ~e ~e" s (read-bytes 30000 r))))
     ;; Tell server protocol = 'ver1:
-    (displayln "Writing ver1")
     (write+flush w 'ver1)
     ;; One more sanity check: server recognizes protocol:
     (let ([s (read r)])
-      (displayln (format "read ver ~s" s))
       (unless (eq? s 'ver1)
         (error 'handin-connect "bad protocol from server: ~e" s)))
     ;; Return connection:

@@ -286,7 +286,7 @@
     (define (report-error tag exn)
       (queue-callback
        (lambda ()
-         (displayln (continuation-mark-set->context (exn-continuation-marks exn)))
+         ;; (displayln (continuation-mark-set->context (exn-continuation-marks exn)))
          (let* ([msg (if (exn? exn)
                        (let ([s (exn-message exn)])
                          (if (string? s) s (format "~.s" s)))
