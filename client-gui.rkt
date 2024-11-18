@@ -109,7 +109,7 @@
     (inherit show is-shown? center)
     (super-new [label handin-dialog-name])
 
-    (init-field content on-retrieve)
+    (init-field content on-retrieve make-report-tab)
     (define mode
       (cond [(and content on-retrieve) #f]
             [content     'submit]
@@ -161,7 +161,7 @@
 
     (define retrieve?
       (new check-box%
-           [label "Retrieve"]
+           [label "Retrieve last submitted file"]
            [parent button-panel]
            [callback (lambda _
                        (define r? (send retrieve? get-value))
@@ -174,7 +174,7 @@
            [style (if mode '(deleted) '())]))
 
     (define (submit-file)
-      (define final-message "Handin successful.")
+      (define final-message "Handin successful. All tests passed.")
       (submit-assignment
        connection
        (send username get-value)
@@ -195,10 +195,22 @@
        (lambda (msg styles) (message-box "Handin" msg this styles)))
       (queue-callback
        (lambda ()
+        (set! committing? #f)
+         (done-interface)
          (when abort-commit-dialog (send abort-commit-dialog show #f))
-         (send status set-label final-message)
-         (set! committing? #f)
-         (done-interface))))
+         (if (string=? final-message "Handin successful. All tests passed.")
+            (begin (send status set-label final-message)
+        (set! committing? #f)
+         (done-interface))
+          (begin
+            (make-report-tab final-message)
+        (set! committing? #f)
+         (done-interface)
+            (send status set-label "Handin complete. Failing tests report generated.")
+            )
+          )
+         ;; (send status set-label final-message)
+         )))
     (define (retrieve-file)
       (let ([buf (retrieve-assignment
                   connection
@@ -758,6 +770,8 @@
         (dynamic-require `(lib "updater.rkt" ,this-collection-name) 'bg-update)
         void))
 
+
+
     (define tool-button-label (bitmap-label-maker button-label/h handin-icon))
 
     (define (make-new-unit-frame% super%)
@@ -805,6 +819,7 @@
         (define client-panel
           (new panel:vertical-discrete-sizes% (parent (get-button-panel))))
 
+
         (define client-button
           (new switchable-button%
                [label button-label/h]
@@ -820,10 +835,19 @@
                          [content content]
                          [on-retrieve
                           (lambda (buf)
+                            (send this create-new-tab)
                             (string->editor!
                              buf
-                             (send (drracket:unit:open-drscheme-window)
-                                   get-editor)))])))]))
+                             (send this
+                                   get-editor)))]
+                         [make-report-tab
+                          (lambda (msg)
+                            (define tmp (make-temporary-file "cs350report~a"))
+                            (send this open-in-new-tab tmp)
+                            (define txt (send this get-definitions-text))
+                            (send txt select-all)
+                            (send txt clear)
+                            (send txt insert (string-append "#lang scribble/text\n" msg) 0))])))]))
 
         (inherit register-toolbar-button)
         (register-toolbar-button client-button #:number -1000)
@@ -832,4 +856,5 @@
               (lambda (l) (cons client-panel (remq client-panel l))))))
 
     (when (and server port-no)
-      (drracket:get/extend:extend-unit-frame make-new-unit-frame% #f))))
+    (drracket:get/extend:extend-unit-frame make-new-unit-frame% #f)
+)))
