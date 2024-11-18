@@ -69,9 +69,8 @@
 
 
 (define (close-handin-ports h)
-  ;; (close-input-port (handin-r h))
-  ;; (close-output-port (handin-w h))
-  (ws-close! (handin-w h)))
+  (close-input-port (handin-r h))
+  (close-output-port (handin-w h)))
 
 (define (wait-for-ok r who . reader)
   (let ([v (if (pair? reader) ((car reader)) (read r))])

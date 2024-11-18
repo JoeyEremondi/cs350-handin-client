@@ -118,7 +118,7 @@
 
     (define status
       (new message%
-           [label (format "Making secure connection to ~a..." server)]
+           [label (format "Making websocket connection to ~a..." server)]
            [parent this]
            [stretchable-width #t]))
     (define username
@@ -228,7 +228,7 @@
                  (lambda ()
                    (remember-user (send username get-value))
                    (with-handlers ([void (lambda (exn)
-                                           (report-error "Handin failed." exn))])
+                                           (report-error "❗ Handin failed ❗" exn))])
                      (if (send retrieve? get-value)
                        (retrieve-file)
                        (submit-file)))))))]))
@@ -537,7 +537,10 @@
              (mk-txt (string-append f ":") old-user-box activate-change))
            (or user-fields '())))
     (define new-passwd
-      (mk-passwd "New Password:" old-user-box activate-change))
+      (begin
+        (new message% (parent old-user-box)
+             (label "❗NOTE: Do NOT re-use passwords from other logins.\n Passwords are stored as MD5 hashes,\n which is secure enough for this course,\n not but for sensitive personal information.❗" ))
+      (mk-passwd "New Password:" old-user-box activate-change)))
     (define new-passwd2
       (mk-passwd "New Password again:" old-user-box activate-change))
     (define-values (retrieve-old-info-button change-button)
