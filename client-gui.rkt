@@ -2,6 +2,7 @@
 
 (require racket/class racket/unit racket/file racket/gui/base net/sendurl
          mrlib/switchable-button mrlib/bitmap-label drracket/tool framework
+         racket/string racket/list
          "info.rkt" "client.rkt" "this-collection.rkt")
 
 (provide tool@)
@@ -842,12 +843,18 @@
                                    get-editor)))]
                          [make-report-tab
                           (lambda (msg)
-                            (define tmp (make-temporary-file "cs350report~a"))
+                            ;; Close other open report tabs
+                            (for ([i (range 0 (send this get-tab-count))])
+                              (when (string-prefix? (send this get-tab-filename i)
+                                                  "cs350-autograder-report-")
+                              (send this close-ith-tab i)))
+                            (define tmp (make-temporary-file "cs350-autograder-report-~a"))
                             (send this open-in-new-tab tmp)
                             (define txt (send this get-definitions-text))
                             (send txt select-all)
                             (send txt clear)
-                            (send txt insert (string-append "#lang scribble/text\n" msg) 0))])))]))
+                            (send txt insert (string-append "#lang scribble/text\n" msg) 0)
+                            (send txt save-file))])))]))
 
         (inherit register-toolbar-button)
         (register-toolbar-button client-button #:number -1000)

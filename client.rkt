@@ -5,6 +5,7 @@
 
 (require net/rfc6455)
 (require net/url)
+(require net/http-client)
 
 (provide handin-connect
          handin-disconnect
@@ -72,9 +73,22 @@
   (close-input-port (handin-r h))
   (close-output-port (handin-w h)))
 
+(define (ping-url url)
+  (with-handlers ([exn:fail?
+                   (λ (ex)
+                     #f)])
+    (sync/timeout 1
+                  (thread (lambda () (let-values ([(status headers body-in)
+                  (http-sendrecv/url (string->url url) #:method 'HEAD)])
+      (if (<= status 299)
+          #t
+          (error "ping fail"))))))))
+
+
 (define (wait-for-ok r who . reader)
   (let ([v (if (pair? reader) ((car reader)) (read r))])
     (unless (eq? v 'ok) (error* "~a error: ~a" who v))))
+
 
 ;; ssl connection, makes a readable error message if no connection
 (define (connect-to server port [cert #f])
@@ -95,11 +109,18 @@
                  [msg (string-append msg " (" (exn-message e) ")")])
             (raise (make-exn:fail:network msg (exn-continuation-marks e)))))])
     ;(ssl-connect server port ctx)
-    (define conn (ws-connect (string->url "wss://racket.cs.uregina.ca/drracket")))
-    (values (ws-output-port conn) (ws-input-port conn))))
+    ;; Only connect via bridge if not on campus
+  (if (ping-url "https://eremondj.csdyn.uregina.ca:7979")
+      (ssl-connect "eremondj.csdyn.uregina.ca" 7979 ctx)
+      (begin
+          (displayln "About to make conn")
+          (let ([conn (ws-connect (string->url "wss://racket.cs.uregina.ca/drracket"))])
+          (displayln "Made conn, returining values")
+          (values  (ws-input-port conn) (ws-output-port conn)))))
+    ))
 
 (define (handin-connect server port [cert #f])
-  (let-values ([(w r) (connect-to server port cert)])
+  (let-values ([(r w) (connect-to server port cert)])
     (write+flush w 'handin)
     ;; Sanity check: server sends "handin", first:
     (let ([s (read-bytes 6 r)])
