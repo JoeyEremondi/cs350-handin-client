@@ -207,7 +207,7 @@
             (make-report-tab final-message)
         (set! committing? #f)
          (done-interface)
-            (send status set-label "Handin complete. Failing tests report generated.")
+            (send status set-label "Handin complete. Test results report generated.")
             )
           )
          ;; (send status set-label final-message)
@@ -240,7 +240,8 @@
                 (thread
                  (lambda ()
                    (remember-user (send username get-value))
-                   (with-handlers ([void (lambda (exn)
+                   (define MAXITERS 5)
+                     (with-handlers ([void (lambda (exn)
                                            (report-error "❗ Handin failed ❗" exn))])
                      (if (send retrieve? get-value)
                        (retrieve-file)

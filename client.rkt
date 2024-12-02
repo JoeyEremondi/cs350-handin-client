@@ -6,6 +6,9 @@
 (require net/rfc6455)
 (require net/url)
 (require net/http-client)
+(require racket/string)
+(require racket/list)
+ (require racket/async-channel)
 
 (provide handin-connect
          handin-disconnect
@@ -17,6 +20,8 @@
          submit-addition
          submit-info-change
          retrieve-user-info)
+
+(define current-thread-id (make-parameter -1))
 
 (define-struct handin (r w))
 
@@ -32,8 +37,10 @@
                     (read-bytes! mut-bytes in-port)
                     )
                   #f
-                  (lambda () (unless (ws-conn-closed? conn)
-                          (ws-close! conn)))))
+                  (lambda ()
+                    ;; (displayln "Closing input ws ")
+                     (ws-close! conn) ;;TODO put back? Looks like output closed first
+                    )))
 
 ;;Sender
 (define (ws-output-port conn)
@@ -43,16 +50,39 @@
   always-evt
   (lambda (bytes start end flush block)
     (define ret (write-bytes bytes current-bytes start end))
+    ;; (printf "Writing bytes start ~s end ~s flush ~s block ~s\n" start end flush block )
     ;; Start a new ws message if we're flushing
     (when (> end start) ;;flush
+      (define FRAGMENT_SIZE 512)
       (define buffered-bytes (get-output-bytes current-bytes))
-      (ws-send! conn buffered-bytes)
+      ;; (displayln (format "~s : Writing bytes ~s" (current-thread-id) buffered-bytes))
+      (if (<= (- end start) FRAGMENT_SIZE)
+      (ws-send! conn buffered-bytes #:payload-type 'text)
+      ;; If message is large, then send it as fragments
+      (begin
+        ;; Send the first chunk with type "text", and marked as non final
+        (ws-send! conn (subbytes buffered-bytes start (+ start FRAGMENT_SIZE))
+                  #:payload-type 'text
+                  #:final-fragment? #f)
+        ;; (displayln "Sent first fragment")
+        ;; Send each intermediate fragment as non-final continuation
+        (for ([start-i (range (+ start FRAGMENT_SIZE) (- end FRAGMENT_SIZE) FRAGMENT_SIZE)])
+          ;; (printf "Sending message start ~s start-i ~s end ~s\n" start start-i end )
+          (ws-send! conn (subbytes buffered-bytes start-i (+ start-i FRAGMENT_SIZE))
+                                   #:payload-type 'continuation
+                                   #:final-fragment? #f))
+        ;; Send the last message with the final marker
+        ;; (printf "Sending last fragment start ~s end ~s\n" (- end (modulo (- end start) FRAGMENT_SIZE)) end)
+        (ws-send! conn (subbytes buffered-bytes (- end (modulo (- end start) FRAGMENT_SIZE)) end)
+                                   #:payload-type 'continuation
+                                   #:final-fragment? #t)))
       (set! current-bytes (open-output-bytes 'ws-output-buffer))
       )
     ret)
   ;; Close if we haven't already
-  (lambda () (unless (ws-conn-closed? conn)
-                          (ws-close! conn)))))
+  (lambda ()
+    ;; (displayln "Closing output ws")
+    (ws-close! conn))))
 
 
 (define (write+flush port . xs)
@@ -73,16 +103,24 @@
   (close-input-port (handin-r h))
   (close-output-port (handin-w h)))
 
-(define (ping-url url)
-  (with-handlers ([exn:fail?
-                   (λ (ex)
-                     #f)])
-    (sync/timeout 1
-                  (thread (lambda () (let-values ([(status headers body-in)
-                  (http-sendrecv/url (string->url url) #:method 'HEAD)])
-      (if (<= status 299)
-          #t
-          (error "ping fail"))))))))
+;; (define (ping-url url)
+;;   (displayln "ping")
+;;   (with-handlers ([(lambda (_) #t)
+;;                    (λ (ex)
+;;                      (displayln "ping timedout")
+;;                      #t)])
+;;     (sync/timeout
+;;         1.0
+;;         (thread (lambda ()
+;;               (displayln "in thread")
+;;             (let-values ([(status headers body-in)
+;;                   (http-sendrecv/url (string->url url) #:method 'HEAD)])
+;;             (let ([status-string (bytes->string/locale status)])
+;;             ;; (displayln "Status string")
+;;             ;; (displayln status-string)
+;;             (if (string-suffix? status-string "OK")
+;;                 #t
+;;                 (error "bad resp")))))))))
 
 
 (define (wait-for-ok r who . reader)
@@ -91,7 +129,7 @@
 
 
 ;; ssl connection, makes a readable error message if no connection
-(define (connect-to server port [cert #f])
+(define (connect-to server port ws-url [cert #f] #:tcp? (tcp? #f))
   (define pem (or cert (in-this-collection "server-cert.pem")))
   (define ctx (ssl-make-client-context))
   (ssl-set-verify! ctx #t)
@@ -110,17 +148,28 @@
             (raise (make-exn:fail:network msg (exn-continuation-marks e)))))])
     ;(ssl-connect server port ctx)
     ;; Only connect via bridge if not on campus
-  (if (ping-url "https://eremondj.csdyn.uregina.ca:7979")
+  (define chan (make-async-channel))
+
+  (if tcp?
+;;    (sync/timeout 2
+;;                   (thread (lambda ()
+;;         (let-values (((r w) (ssl-connect "eremondj.csdyn.uregina.ca" 7979 ctx)))
+;;         (async-channel-put chan (cons r w) ) ))
+;; ))
+      ;; (begin
+      ;;   (let ([rw (async-channel-get chan)])
+      ;;   (values (car rw) (cdr rw))))
+      ;;  Direct TCP connection
       (ssl-connect "eremondj.csdyn.uregina.ca" 7979 ctx)
+      ;; Use websocket ports instead
       (begin
-          (displayln "About to make conn")
-          (let ([conn (ws-connect (string->url "wss://racket.cs.uregina.ca/drracket"))])
-          (displayln "Made conn, returining values")
+          ;; (let ([conn (ws-connect (string->url "wss://racket.cs.uregina.ca/drracket"))])
+          (let ([conn (ws-connect (string->url ws-url))])
           (values  (ws-input-port conn) (ws-output-port conn)))))
     ))
 
-(define (handin-connect server port [cert #f])
-  (let-values ([(r w) (connect-to server port cert)])
+(define (handin-connect server port [cert #f] #:tcp? (tcp? #f) #:ws-url (url  "wss://racket.cs.uregina.ca/drracket") )
+  (let-values ([(r w) (connect-to server port url cert #:tcp? tcp?)])
     (write+flush w 'handin)
     ;; Sanity check: server sends "handin", first:
     (let ([s (read-bytes 6 r)])
@@ -167,8 +216,10 @@
 
 (define (submit-assignment h username passwd assignment content
                            on-commit message message-final message-box
-                           #:submit-on-error? [submit-on-error? #f])
-  (let ([r (handin-r h)] [w (handin-w h)])
+                           #:submit-on-error? [submit-on-error? #f]
+                           #:thread-id [thread-id -1])
+  (parameterize ([current-thread-id thread-id])
+   (let ([r (handin-r h)] [w (handin-w h)])
     (define (read/message)
       (let ([v (read r)])
         (case v
@@ -200,7 +251,7 @@
     (on-commit)
     (write+flush w 'check)
     (wait-for-ok r "commit" read/message)
-    (close-handin-ports h)))
+    (close-handin-ports h))))
 
 (define (retrieve-assignment h username passwd assignment)
   (let ([r (handin-r h)] [w (handin-w h)])
