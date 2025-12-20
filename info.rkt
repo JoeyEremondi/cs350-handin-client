@@ -14,6 +14,7 @@
 (define drracket-tool-icons `("icon.png"))
 ;; Modify the provided "icon.png" file to your school/lab/etc logo.
 
+
 ;; You must define a server:port for the client to be functional
 (define server:port "racket.cs.uregina.ca:443")
 
@@ -22,13 +23,13 @@
 ;; the specified web page (using the user's chosen web
 ;; browser.)
 (define web-menu-name "Course Homepage")
-(define web-address "https://www.uregina.ca/science/computer-science")
+(define web-address "https://eremondi.com/cs350/plt")
 
 ;; Auto-updater section (see handin-server/doc.txt for details)
-;(define enable-auto-update #t) ; enable auto-update?
+(define enable-auto-update #t) ; enable auto-update?
 ;(define version-check-frequency 1) ; update-check every N hours (#f: disable)
-;(define version-filename "handin-version")
-;(define package-filename "handin.plt")
+(define version-filename "version")
+(define package-filename "cs350.plt")
 
 ;; Multi-file submission section (see handin-server/doc.txt for details)
 ;(define enable-multifile-handin #t) ; enable multi-file?

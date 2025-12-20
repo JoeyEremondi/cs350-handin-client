@@ -3,9 +3,10 @@
 (require openssl/mzssl "this-collection.rkt")
 ;; (require net/http-client)
 
-(require net/rfc6455)
+(require websocket/rfc6455)
 (require net/url)
-(require net/http-client)
+(require racket/port)
+;; (require net/http-client)
 (require racket/string)
 (require racket/list)
  (require racket/async-channel)
@@ -21,9 +22,17 @@
          submit-info-change
          retrieve-user-info)
 
+
+(define FRAGMENT_SIZE 512000000)
+
 (define current-thread-id (make-parameter -1))
 
 (define-struct handin (r w))
+
+(define-syntax-rule (debugln x args ...)
+  ;; (displayln (format x args ...))
+  (void)
+             )
 
 ;; errors to the user: no need for a "foo: " prefix
 (define (error* fmt . args)
@@ -34,7 +43,9 @@
   (make-input-port 'ws-input
                   (lambda (mut-bytes)
                     (define in-port (ws-recv-stream conn))
-                    (read-bytes! mut-bytes in-port)
+                    (define ret (read-bytes! mut-bytes in-port))
+                    (debugln "Read ~s websocket bytes\n    ~s" ret (bytes->string/utf-8 mut-bytes #f 0 ret))
+                    ret
                     )
                   #f
                   (lambda ()
@@ -49,11 +60,11 @@
   (make-output-port 'ws-output
   always-evt
   (lambda (bytes start end flush block)
+    (debugln "Writing bytes ~s\n     start end ~s ~s ~s ~s" bytes start end flush block)
     (define ret (write-bytes bytes current-bytes start end))
     ;; (printf "Writing bytes start ~s end ~s flush ~s block ~s\n" start end flush block )
     ;; Start a new ws message if we're flushing
     (when (> end start) ;;flush
-      (define FRAGMENT_SIZE 512)
       (define buffered-bytes (get-output-bytes current-bytes))
       ;; (displayln (format "~s : Writing bytes ~s" (current-thread-id) buffered-bytes))
       (if (<= (- end start) FRAGMENT_SIZE)
@@ -129,7 +140,7 @@
 
 
 ;; ssl connection, makes a readable error message if no connection
-(define (connect-to server port ws-url [cert #f] #:tcp? (tcp? #f))
+(define (connect-to server port ws-url [cert #f] #:force-websocket? (force-websocket? #f))
   (define pem (or cert (in-this-collection "server-cert.pem")))
   (define ctx (ssl-make-client-context))
   (ssl-set-verify! ctx #t)
@@ -149,27 +160,35 @@
     ;(ssl-connect server port ctx)
     ;; Only connect via bridge if not on campus
   (define chan (make-async-channel))
-
-  (if tcp?
-;;    (sync/timeout 2
-;;                   (thread (lambda ()
-;;         (let-values (((r w) (ssl-connect "eremondj.csdyn.uregina.ca" 7979 ctx)))
-;;         (async-channel-put chan (cons r w) ) ))
-;; ))
-      ;; (begin
-      ;;   (let ([rw (async-channel-get chan)])
-      ;;   (values (car rw) (cdr rw))))
-      ;;  Direct TCP connection
-      (ssl-connect "eremondj.csdyn.uregina.ca" 7979 ctx)
-      ;; Use websocket ports instead
+  ;; (define my-ip (port->string (get-pure-port (string->url "https://api.ipify.org"))))
+  ;; (define on-campus? (string-prefix? my-ip "142.3"))
+  ;; Try connecting via TCP
+  (define tcp-success-channel (make-channel))
+  (define tcp-url "eremondj.csdyn.uregina.ca" )
+  (define tcp-port 7971)
+  (define conn-thr
+    (thread (lambda ()
+          (when (not force-websocket?)
+            (define-values (l r) (ssl-connect tcp-url tcp-port ctx))
+            (channel-put tcp-success-channel (cons l r))))))
+  (sleep)
+  (define tcp-conn (and (not force-websocket?) (sync/timeout 1.5 tcp-success-channel)))
+  (kill-thread conn-thr)
+  ;; Force TCP connection if we're on campus
+  (if tcp-conn
       (begin
+        ;; (displayln "Connecting directly via TCP")
+        (values (car tcp-conn) (cdr tcp-conn)))
+      ;; Use websocket ports if TCP failed
+      (begin
+          ;; (displayln "Falling back to websocket connection")
           ;; (let ([conn (ws-connect (string->url "wss://racket.cs.uregina.ca/drracket"))])
           (let ([conn (ws-connect (string->url ws-url))])
           (values  (ws-input-port conn) (ws-output-port conn)))))
     ))
 
-(define (handin-connect server port [cert #f] #:tcp? (tcp? #f) #:ws-url (url  "wss://racket.cs.uregina.ca/drracket") )
-  (let-values ([(r w) (connect-to server port url cert #:tcp? tcp?)])
+(define (handin-connect server port [cert #f] #:force-websocket? (force-websocket? #f) #:ws-url (url  "wss://racket.cs.uregina.ca/drracket") )
+  (let-values ([(r w) (connect-to server port url cert #:force-websocket? force-websocket?)])
     (write+flush w 'handin)
     ;; Sanity check: server sends "handin", first:
     (let ([s (read-bytes 6 r)])
