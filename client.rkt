@@ -238,7 +238,17 @@
                            #:submit-on-error? [submit-on-error? #f]
                            #:thread-id [thread-id -1])
   (parameterize ([current-thread-id thread-id])
-   (let ([r (handin-r h)] [w (handin-w h)])
+   (define failed #t)
+   (let loop ([fail-count 0])
+     (define (error*-or-tryagain arg fmt)
+       (if (and (string-contains? arg "eof") (<= fail-count 10))
+            (begin
+              (sleep 0.5)
+              (loop (add1 fail-count)))
+           (error* arg fmt)
+           
+           ))
+    (let ([r (handin-r h)] [w (handin-w h)])
     (define (read/message)
       (let ([v (read r)])
         (case v
@@ -256,7 +266,7 @@
     (wait-for-ok r "login")
     (write+flush w (bytes-length content))
     (let ([v (read r)])
-      (unless (eq? v 'go) (error* "upload error: ~a" v)))
+      (unless (eq? v 'go) (error*-or-tryagain "upload error: ~a" v)))
     (display "$" w)
     (display content w)
     (flush-output w)
@@ -266,11 +276,12 @@
     ;; we expect a string and a style-list to be used with `message-box' and
     ;; the resulting value written back
     (let ([v (read/message)])
-      (unless (eq? 'confirm v) (error* "submit error: ~a" v)))
+      (unless (eq? 'confirm v) (error*-or-tryagain "submit error: ~a" v)))
     (on-commit)
     (write+flush w 'check)
     (wait-for-ok r "commit" read/message)
-    (close-handin-ports h))))
+    (close-handin-ports h))
+    )))
 
 (define (retrieve-assignment h username passwd assignment)
   (let ([r (handin-r h)] [w (handin-w h)])

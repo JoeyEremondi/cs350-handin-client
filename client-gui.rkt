@@ -2,7 +2,7 @@
 
 (require racket/class racket/unit racket/file racket/gui/base net/sendurl
          mrlib/switchable-button mrlib/bitmap-label drracket/tool framework
-         racket/string racket/list
+         racket/string racket/list racket/gui
          "info.rkt" "client.rkt" "this-collection.rkt")
 
 (provide tool@)
@@ -766,6 +766,24 @@
     (import drracket:tool^)
     (export drracket:tool-exports^)
 
+(define copy-limiting-text-mixin
+      (mixin (racket:text<%> drracket:unit:definitions-text<%>) ()
+        (super-new)
+
+        ;; (inherit do-copy do-paste)
+        (define/override (do-copy start end time extend?)
+          (define shortEnd (and end start (min end (+ start 1024))))
+          (super do-copy start shortEnd time extend?))
+        ;; (define/augment (after-insert start len)
+        ;;   (define holes (hash-ref hole-info (get-tab) #f))
+        ;;   (when holes
+        ;;     (interval-map-expand! holes start (+ start len))
+        ;;     (update-hole-info!)))
+
+        ))
+
+
+    
     (define phase1 void)
     (define phase2
       (if updater?
@@ -865,4 +883,5 @@
 
     (when (and server port-no)
     (drracket:get/extend:extend-unit-frame make-new-unit-frame% #f)
+    ;; (drracket:get/extend:extend-definitions-text copy-limiting-text-mixin)
 )))
